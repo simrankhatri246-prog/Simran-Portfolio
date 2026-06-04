@@ -682,6 +682,10 @@ footer{
         <p>
             Interactive choropleth map visualizing provincial tourism distribution across Nepal using Leaflet.js and GeoJSON.
         </p>
+         <p>
+            Hover + Click Features:
+            Hover shows province info; click shows AI insights and comparison.
+        </p>
 
         <div id="map"></div>
 
@@ -694,115 +698,172 @@ footer{
 
 <script>
 
-const map = L.map('map').setView([28.3, 84], 7);
+/* BASE LAYERS */
+const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
 
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution:'© OpenStreetMap contributors'
-}).addTo(map);
+const satellite = L.tileLayer(
+'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+);
 
+const terrain = L.tileLayer(
+'https://{s}.tile.opentopomap.org/{z}/{y}/{x}.png'
+);
+
+/* MAP */
+const map = L.map('map',{
+center:[28.3,84],
+zoom:7,
+layers:[osm]
+});
+
+const baseMaps = {
+"OpenStreetMap": osm,
+"Satellite": satellite,
+"Terrain": terrain
+};
+
+L.control.layers(baseMaps).addTo(map);
+
+/* COLOR */
 function getColor(d){
-    return d > 350000 ? '#08306b' :
-           d > 250000 ? '#2171b5' :
-           d > 150000 ? '#4292c6' :
-           d > 100000 ? '#6baed6' :
-           d > 80000 ? '#9ecae1' :
-                        '#c6dbef';
+return d > 350000 ? '#08306b' :
+       d > 250000 ? '#2171b5' :
+       d > 150000 ? '#4292c6' :
+       d > 100000 ? '#6baed6' :
+       '#c6dbef';
 }
 
 function style(feature){
-    return{
-        fillColor:getColor(feature.properties.tourism),
-        weight:2,
-        opacity:1,
-        color:'white',
-        dashArray:'3',
-        fillOpacity:0.8
-    };
+return {
+fillColor:getColor(feature.properties.tourism),
+weight:2,
+color:'white',
+fillOpacity:0.8
+};
 }
 
-const info = L.control();
+/* ================= HOVER INFO ================= */
+const hoverInfo = L.control();
 
-info.onAdd = function(){
-    this._div = L.DomUtil.create('div','info');
-    this.update();
-    return this._div;
+hoverInfo.onAdd = function(){
+this._div = L.DomUtil.create('div','info');
+this._div.style.background = "white";
+this._div.style.padding = "10px";
+this._div.style.borderRadius = "10px";
+this._div.style.boxShadow = "0 2px 10px rgba(0,0,0,0.2)";
+this.update();
+return this._div;
 };
 
-info.update = function(props){
-    this._div.innerHTML =
-        '<h4>Provincial Tourism Data</h4>' +
-        (props ?
-        '<b>' + props.shapeName + '</b><br>' +
-        'Tourists: ' + props.tourism.toLocaleString()
-        :
-        'Hover over a province');
+hoverInfo.update = function(props){
+this._div.innerHTML =
+props ?
+"<b>" + props.shapeName + "</b><br>" +
+"Approx Tourists: " + props.tourism.toLocaleString()
+:
+"Hover over a province";
 };
 
-info.addTo(map);
+hoverInfo.addTo(map);
 
-function highlightFeature(e){
+/* ================= AI INSIGHT ================= */
+function getAIInsight(name, value){
 
-    const layer = e.target;
-
-    layer.setStyle({
-        weight:4,
-        color:'#111',
-        dashArray:'',
-        fillOpacity:0.9
-    });
-
-    layer.bringToFront();
-
-    info.update(layer.feature.properties);
+if(value > 300000){
+return "High tourism hub with strong economic activity and major attractions.";
+}
+else if(value > 150000){
+return "Moderate tourism zone with growing infrastructure and potential.";
+}
+else{
+return "Low tourism area — opportunity for tourism development and investment.";
 }
 
-function resetHighlight(e){
-    geojson.resetStyle(e.target);
-    info.update();
 }
 
-function zoomToFeature(e){
-    map.fitBounds(e.target.getBounds());
+/* ================= BAR CHART ================= */
+function createBarChart(value){
+
+let percent = Math.min(value / 400000 * 100, 100);
+
+return `
+<div style="margin-top:10px;">
+<b>Tourism Comparison</b>
+<div style="background:#e5e7eb;width:100%;height:10px;border-radius:5px;">
+<div style="width:${percent}%;height:10px;background:#3b82f6;border-radius:5px;"></div>
+</div>
+<small>Relative to national max</small>
+</div>
+`;
 }
 
+/* ================= POPUP + CLICK ================= */
 function onEachFeature(feature, layer){
-    layer.on({
-        mouseover:highlightFeature,
-        mouseout:resetHighlight,
-        click:zoomToFeature
-    });
+
+layer.on({
+
+mouseover: function(){
+hoverInfo.update(feature.properties);
+},
+
+mouseout: function(){
+hoverInfo.update();
+},
+
+click: function(){
+
+let name = feature.properties.shapeName;
+let value = feature.properties.tourism;
+
+let ai = getAIInsight(name, value);
+let chart = createBarChart(value);
+
+layer.bindPopup(`
+<h3>${name}</h3>
+<p><b>Total Tourists:</b> ${value.toLocaleString()}</p>
+<hr>
+<p><b>🤖 AI Insight:</b> ${ai}</p>
+${chart}
+`).openPopup();
+
+map.fitBounds(layer.getBounds());
 }
-
-let geojson;
-
-fetch('nepal_provincial_tourism.geojson')
-.then(response => response.json())
-.then(data => {
-
-    geojson = L.geoJson(data,{
-        style:style,
-        onEachFeature:onEachFeature
-    }).addTo(map);
 
 });
 
+}
+
+/* LOAD GEOJSON */
+fetch('nepal_provincial_tourism.geojson')
+.then(res => res.json())
+.then(data => {
+
+L.geoJson(data,{
+style:style,
+onEachFeature:onEachFeature
+}).addTo(map);
+
+});
+
+/* ================= LEGEND (NEW ADDED) ================= */
 const legend = L.control({position:'bottomright'});
 
-legend.onAdd = function () {
+legend.onAdd = function(){
 
-    const div = L.DomUtil.create('div', 'legend'),
-          grades = [0, 80000, 100000, 150000, 250000, 350000];
+const div = L.DomUtil.create('div','info legend');
 
-    div.innerHTML += '<strong>Tourists</strong><br>';
+const grades = [0, 100000, 150000, 250000, 350000];
 
-    for (let i = 0; i < grades.length; i++) {
+div.innerHTML = "<b>Tourism Legend</b><br>";
 
-        div.innerHTML +=
-            '<i style="background:' + getColor(grades[i] + 1) + '"></i> ' +
-            grades[i] + (grades[i + 1] ? '&ndash;' + grades[i + 1] + '<br>' : '+');
-    }
+for(let i = 0; i < grades.length; i++){
 
-    return div;
+div.innerHTML +=
+'<i style="background:' + getColor(grades[i] + 1) + '"></i> ' +
+grades[i] + (grades[i + 1] ? '&ndash;' + grades[i + 1] + '<br>' : '+');
+}
+
+return div;
 };
 
 legend.addTo(map);
